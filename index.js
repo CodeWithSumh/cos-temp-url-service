@@ -1,11 +1,23 @@
 const express = require('express')
 const COS = require('cos-nodejs-sdk-v5')
 const request = require('request')
+const cors = require('cors')
 
 const app = express()
 const port = process.env.PORT || 3000
 
 let cos = null
+
+// ✅ CORS 配置（重点）
+app.use(cors({
+  origin: [
+    'https://media-service-217355-6-1395711158.sh.run.tcloudbase.com/',   // 你的 Vue2 页面域名
+    'https://servicewechat.com'    // 小程序 WebView 常用
+  ],
+  methods: ['GET'],
+  allowedHeaders: ['Content-Type'],
+  credentials: false
+}))
 
 /**
  * 初始化 COS（服务启动时执行一次）
