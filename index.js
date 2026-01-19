@@ -4,18 +4,13 @@ const COS = require('cos-nodejs-sdk-v5')
 const app = express()
 const port = process.env.PORT || 3000
 
-// 通过环境变量注入（云托管里配置）
-const cos = new COS({
-  SecretId: process.env.COS_SECRET_ID,
-  SecretKey: process.env.COS_SECRET_KEY,
-})
+// ❗️这里不传 SecretId / SecretKey
+// 微信云托管会自动注入临时凭证
+const cos = new COS()
 
-const BUCKET = process.env.COS_BUCKET
-const REGION = process.env.COS_REGION
+const BUCKET = '7072-prod-6gnlypud73cf4391-1395711158'
+const REGION = 'ap-shanghai'
 
-/**
- * GET /api/getTempUrl?key=models/demo.splat
- */
 app.get('/api/getTempUrl', (req, res) => {
   const { key } = req.query
 
@@ -29,7 +24,7 @@ app.get('/api/getTempUrl', (req, res) => {
       Region: REGION,
       Key: key,
       Sign: true,
-      Expires: 60 * 10 // 10 分钟
+      Expires: 600
     },
     (err, data) => {
       if (err) {
@@ -37,13 +32,11 @@ app.get('/api/getTempUrl', (req, res) => {
         return res.status(500).json({ error: 'cos error' })
       }
 
-      res.json({
-        url: data.Url
-      })
+      res.json({ url: data.Url })
     }
   )
 })
 
 app.listen(port, () => {
-  console.log(`server running on ${port}`)
+  console.log('server running')
 })
