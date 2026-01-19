@@ -49,7 +49,6 @@ async function initCos() {
     }
   })
 
-  console.log('COS 初始化完成')
 }
 
 /**
