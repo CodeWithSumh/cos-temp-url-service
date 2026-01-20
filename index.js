@@ -1,11 +1,16 @@
 const express = require('express');
 const cors = require('cors');
+const COS = require('cos-nodejs-sdk-v5');
+const request = require('request');
 const fetch = require('node-fetch');
 
 const app = express();
+const port = process.env.PORT || 3000;
+
+let cos = null;
 
 /**
- * ✅ CORS：只允许必要内容
+ * ✅ CORS（只针对你的页面）
  */
 app.use(cors({
   origin: [
@@ -26,14 +31,45 @@ app.use(cors({
 }));
 
 /**
- * ✅ 必须显式处理 OPTIONS（非常关键）
+ * ✅ 显式处理预检请求（非常关键）
  */
 app.options('/api/splat', (req, res) => {
   res.sendStatus(204);
 });
 
 /**
- * ✅ splat 代理接口
+ * ✅ 初始化 COS（你原来的逻辑，未改）
+ */
+function initCos() {
+  cos = new COS({
+    getAuthorization: function (options, callback) {
+      request(
+        {
+          url: 'http://api.weixin.qq.com/_/cos/getauth',
+          method: 'GET'
+        },
+        function (err, response, body) {
+          if (err) {
+            console.error('getauth error', err);
+            return;
+          }
+
+          const info = JSON.parse(body);
+
+          callback({
+            TmpSecretId: info.TmpSecretId,
+            TmpSecretKey: info.TmpSecretKey,
+            SecurityToken: info.Token,
+            ExpiredTime: info.ExpiredTime
+          });
+        }
+      );
+    }
+  });
+}
+
+/**
+ * ✅ splat 代理接口（核心）
  */
 app.get('/api/splat', async (req, res) => {
   try {
@@ -43,23 +79,38 @@ app.get('/api/splat', async (req, res) => {
     }
 
     /**
-     * 这里是你生成的 COS 临时 URL
-     * 示例用假方法表示
+     * 1️⃣ 获取 COS 临时下载 URL（你原本就有）
      */
-    const cosTempUrl = await getCosTempUrl(key);
+    const cosUrl = await new Promise((resolve, reject) => {
+      cos.getObjectUrl(
+        {
+          Bucket: process.env.COS_BUCKET,
+          Region: process.env.COS_REGION,
+          Key: key,
+          Sign: true
+        },
+        (err, data) => {
+          if (err) return reject(err);
+          resolve(data.Url);
+        }
+      );
+    });
 
     /**
-     * 关键：透传 Range
+     * 2️⃣ 透传 Range（GaussianSplats3D 必须）
      */
     const headers = {};
     if (req.headers.range) {
       headers.range = req.headers.range;
     }
 
-    const cosResp = await fetch(cosTempUrl, { headers });
+    /**
+     * 3️⃣ 从 COS 拉数据
+     */
+    const cosResp = await fetch(cosUrl, { headers });
 
     /**
-     * 关键：把 COS 的 Range 响应头完整返回
+     * 4️⃣ 设置必要响应头
      */
     res.status(cosResp.status);
     res.set({
@@ -69,23 +120,19 @@ app.get('/api/splat', async (req, res) => {
       'Content-Range': cosResp.headers.get('content-range')
     });
 
+    /**
+     * 5️⃣ 流式返回（140MB 没压力）
+     */
     cosResp.body.pipe(res);
 
   } catch (err) {
-    console.error(err);
+    console.error('splat proxy error:', err);
     res.status(500).send('internal error');
   }
 });
 
-/**
- * 示例：你已有的临时 URL 获取逻辑
- */
-async function getCosTempUrl(key) {
-  // 这里换成你已经部署成功的 COS SDK 逻辑
-  return `https://example.cos.temp.url/${key}`;
-}
+initCos();
 
-const port = process.env.PORT || 3000;
 app.listen(port, () => {
-  console.log('splat proxy running on port', port);
+  console.log(`splat proxy running on port ${port}`);
 });
