@@ -2,7 +2,6 @@ const express = require('express');
 const cors = require('cors');
 const COS = require('cos-nodejs-sdk-v5');
 const request = require('request');
-const fetch = require('node-fetch');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -78,9 +77,7 @@ app.get('/api/splat', async (req, res) => {
       return res.status(400).send('missing key');
     }
 
-    /**
-     * 1️⃣ 获取 COS 临时下载 URL（你原本就有）
-     */
+    // 1️⃣ 获取 COS 签名 URL
     const cosUrl = await new Promise((resolve, reject) => {
       cos.getObjectUrl(
         {
@@ -96,34 +93,34 @@ app.get('/api/splat', async (req, res) => {
       );
     });
 
-    /**
-     * 2️⃣ 透传 Range（GaussianSplats3D 必须）
-     */
+    // 2️⃣ 透传 Range（关键）
     const headers = {};
     if (req.headers.range) {
-      headers.range = req.headers.range;
+      headers.Range = req.headers.range;
     }
 
-    /**
-     * 3️⃣ 从 COS 拉数据
-     */
-    const cosResp = await fetch(cosUrl, { headers });
-
-    /**
-     * 4️⃣ 设置必要响应头
-     */
-    res.status(cosResp.status);
-    res.set({
-      'Content-Type': 'application/octet-stream',
-      'Accept-Ranges': 'bytes',
-      'Content-Length': cosResp.headers.get('content-length'),
-      'Content-Range': cosResp.headers.get('content-range')
-    });
-
-    /**
-     * 5️⃣ 流式返回（140MB 没压力）
-     */
-    cosResp.body.pipe(res);
+    // 3️⃣ 直接用 request 流式代理 COS
+    request({
+      url: cosUrl,
+      method: 'GET',
+      headers
+    })
+      .on('response', cosRes => {
+        // 4️⃣ 回写必要响应头
+        res.status(cosRes.statusCode);
+        res.set({
+          'Content-Type': 'application/octet-stream',
+          'Accept-Ranges': 'bytes',
+          'Content-Length': cosRes.headers['content-length'],
+          'Content-Range': cosRes.headers['content-range']
+        });
+      })
+      .on('error', err => {
+        console.error('COS stream error:', err);
+        res.status(502).send('cos fetch failed');
+      })
+      // 5️⃣ 管道返回（真正支持 100MB+ splat）
+      .pipe(res);
 
   } catch (err) {
     console.error('splat proxy error:', err);
